@@ -5,8 +5,8 @@ import datetime
 import time
 import logging
 import re
-import requests
-import json 
+import json
+import aiohttp
 
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
@@ -34,11 +34,10 @@ except ImportError:
         PLATFORM_SCHEMA,
     )
 
-
 from homeassistant.helpers.reload import async_setup_reload_service
+from asyncio import Lock
 
 __version__ = "0.0.3"
-
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -49,19 +48,18 @@ URL_SET_DATA = "https://salus-it500.com/includes/set.php"
 
 DEFAULT_NAME = "Salus Thermostat"
 
-
 CONF_NAME = "name"
 
 # Values from web interface
 MIN_TEMP = 5
 MAX_TEMP = 34.5
 
-SUPPORT_FLAGS = ClimateEntityFeature.TARGET_TEMPERATURE
+SUPPORT_FLAGS = (
+    ClimateEntityFeature.TARGET_TEMPERATURE | ClimateEntityFeature.TURN_ON | ClimateEntityFeature.TURN_OFF
+)
 
 DOMAIN = "salusfy"
 PLATFORMS = ["climate"]
-
-
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     {
@@ -72,22 +70,14 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     }
 )
 
-
-# def setup_platform(hass, config, add_entities, discovery_info=None):
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     await async_setup_reload_service(hass, DOMAIN, PLATFORMS)
-    """Set up the E-Thermostaat platform."""
     name = config.get(CONF_NAME)
     username = config.get(CONF_USERNAME)
     password = config.get(CONF_PASSWORD)
     id = config.get(CONF_ID)
 
-    # add_entities(
-    #     [SalusThermostat(name, username, password, id)]
-    async_add_entities(
-    [SalusThermostat(name, username, password, id)]
-    )
-
+    async_add_entities([SalusThermostat(name, username, password, id)])
 
 class SalusThermostat(ClimateEntity):
     """Representation of a Salus Thermostat device."""
@@ -104,12 +94,13 @@ class SalusThermostat(ClimateEntity):
         self._status = None
         self._current_operation_mode = None
         self._token = None
-        
-        self._session = requests.Session()
-        
-        
-        self.update()
-    
+        self._session = aiohttp.ClientSession()
+        self._update_lock = Lock()
+
+    async def close(self):
+        """Close the aiohttp session."""
+        await self._session.close()
+
     @property
     def supported_features(self):
         """Return the list of supported features."""
@@ -119,7 +110,7 @@ class SalusThermostat(ClimateEntity):
     def name(self):
         """Return the name of the thermostat."""
         return self._name
-        
+
     @property
     def unique_id(self) -> str:
         """Return the unique ID for this thermostat."""
@@ -155,21 +146,12 @@ class SalusThermostat(ClimateEntity):
         """Return the temperature we try to reach."""
         return self._target_temperature
 
-
     @property
     def hvac_mode(self):
         """Return hvac operation ie. heat, cool mode."""
-        try:
-            climate_mode = self._current_operation_mode
-            curr_hvac_mode = HVACMode.OFF
-            if climate_mode == "ON":
-                curr_hvac_mode = HVACMode.HEAT
-            else:
-                curr_hvac_mode = HVACMode.OFF
-        except KeyError:
-            return HVACMode.OFF
-        return curr_hvac_mode
-        
+        climate_mode = self._current_operation_mode
+        return HVACMode.HEAT if climate_mode == "ON" else HVACMode.OFF
+
     @property
     def hvac_modes(self):
         """HVAC modes."""
@@ -178,109 +160,115 @@ class SalusThermostat(ClimateEntity):
     @property
     def hvac_action(self):
         """Return the current running hvac operation."""
-        if self._status == "ON":
-            return HVACAction.HEATING
-        return HVACAction.IDLE
-        
+        return HVACAction.HEATING if self._status == "ON" else HVACAction.IDLE
 
     @property
     def preset_mode(self):
         """Return the current preset mode, e.g., home, away, temp."""
         return self._status
-        
+
     @property
     def preset_modes(self):
         """Return a list of available preset modes."""
-        return SUPPORT_PRESET
-        
-        
-    def set_temperature(self, **kwargs):
+        return []  # Define preset modes if applicable
+
+    async def set_temperature(self, **kwargs):
         """Set new target temperature."""
         temperature = kwargs.get(ATTR_TEMPERATURE)
-        if temperature is None:
-            return
-        self._set_temperature(temperature)
+        if temperature is not None:
+            await self._set_temperature(temperature)
 
-    def _set_temperature(self, temperature):
+    async def _set_temperature(self, temperature):
         """Set new target temperature, via URL commands."""
-        payload = {"token": self._token, "devId": self._id, "tempUnit": "0", "current_tempZ1_set": "1", "current_tempZ1": temperature}
+        payload = {
+            "token": self._token,
+            "devId": self._id,
+            "tempUnit": "0",
+            "current_tempZ1_set": "1",
+            "current_tempZ1": temperature,
+        }
         headers = {"content-type": "application/x-www-form-urlencoded"}
-        try:
-            if self._session.post(URL_SET_DATA, data=payload, headers=headers):
+        async with self._session.post(URL_SET_DATA, data=payload, headers=headers) as response:
+            if response.status == 200:
                 self._target_temperature = temperature
-                # self.schedule_update_ha_state(force_refresh=True)
-            _LOGGER.info("Salusfy set_temperature OK")
-        except:
-            _LOGGER.error("Error Setting the temperature.")
+                _LOGGER.info("Salusfy set_temperature OK")
+            else:
+                _LOGGER.error(f"Failed to set temperature, status: {response.status}")
 
-    def set_hvac_mode(self, hvac_mode):
+    async def set_hvac_mode(self, hvac_mode):
         """Set HVAC mode, via URL commands."""
-        
         headers = {"content-type": "application/x-www-form-urlencoded"}
-        if hvac_mode == HVACMode.OFF:
-            payload = {"token": self._token, "devId": self._id, "auto": "1", "auto_setZ1": "1"}
-            try:
-                if self._session.post(URL_SET_DATA, data=payload, headers=headers):
-                    self._current_operation_mode = "OFF"
-            except:
-                _LOGGER.error("Error Setting HVAC mode OFF.")
-        elif hvac_mode == HVACMode.HEAT:
-            payload = {"token": self._token, "devId": self._id, "auto": "0", "auto_setZ1": "1"}
-            try:
-                if self._session.post(URL_SET_DATA, data=payload, headers=headers):
-                    self._current_operation_mode = "ON"
-            except:
-                _LOGGER.error("Error Setting HVAC mode.")
-        _LOGGER.info("Setting the HVAC mode.")
-            
-    def get_token(self):
+        payload = {
+            "token": self._token,
+            "devId": self._id,
+            "auto": "1" if hvac_mode == HVACMode.OFF else "0",
+            "auto_setZ1": "1",
+        }
+        async with self._session.post(URL_SET_DATA, data=payload, headers=headers) as response:
+            if response.status == 200:
+                self._current_operation_mode = "OFF" if hvac_mode == HVACMode.OFF else "ON"
+                _LOGGER.info("Salusfy set_hvac_mode OK")
+            else:
+                _LOGGER.error(f"Failed to set HVAC mode, status: {response.status}")
+
+    async def get_token(self):
         """Get the Session Token of the Thermostat."""
-        payload = {"IDemail": self._username, "password": self._password, "login": "Login", "keep_logged_in": "1"}
+        payload = {
+            "IDemail": self._username,
+            "password": self._password,
+            "login": "Login",
+            "keep_logged_in": "1",
+        }
         headers = {"content-type": "application/x-www-form-urlencoded"}
-        
-        try:
-            self._session.post(URL_LOGIN, data=payload, headers=headers)
-            params = {"devId": self._id}
-            getTkoken = self._session.get(URL_GET_TOKEN,params=params)
-            result = re.search('<input id="token" type="hidden" value="(.*)" />', getTkoken.text)
-            _LOGGER.info("Salusfy get_token OK")
-            self._token = result.group(1)
-        except:
-            _LOGGER.error("Error Geting the Session Token.")
+        async with self._session.post(URL_LOGIN, data=payload, headers=headers) as response:
+            if response.status == 200:
+                params = {"devId": self._id}
+                async with self._session.get(URL_GET_TOKEN, params=params) as token_response:
+                    text = await token_response.text()
+                    result = re.search('<input id="token" type="hidden" value="(.*)" />', text)
+                    if result:
+                        self._token = result.group(1)
+                        _LOGGER.info("Salusfy get_token OK")
+                    else:
+                        _LOGGER.error("Failed to extract token.")
+            else:
+                _LOGGER.error(f"Login failed with status {response.status}.")
 
-    def _get_data(self):
+    async def _get_data(self):
         if self._token is None:
-            self.get_token()
-        params = {"devId": self._id, "token": self._token, "&_": str(int(round(time.time() * 1000)))}
+            await self.get_token()
+        params = {
+            "devId": self._id,
+            "token": self._token,
+            "&_": str(int(round(time.time() * 1000))),
+        }
         try:
-            r = self._session.get(url = URL_GET_DATA, params = params)
-            try:
-                if r:
-                    data = json.loads(r.text)
-                    _LOGGER.info("Salusfy get_data output OK")
-                    self._target_temperature = float(data["CH1currentSetPoint"])
-                    self._current_temperature = float(data["CH1currentRoomTemp"])
-                    self._frost = float(data["frost"])
-                    
-                    status = data['CH1heatOnOffStatus']
-                    if status == "1":
-                      self._status = "ON"
+            async with self._session.get(URL_GET_DATA, params=params) as response:
+                if response.status == 200:
+                    content_type = response.headers.get('Content-Type', '')
+                    text = await response.text()
+                    if 'application/json' in content_type or text.startswith('{'):
+                        data = json.loads(text)
+                        _LOGGER.info("Salusfy get_data output OK")
+                        self._target_temperature = float(data["CH1currentSetPoint"])
+                        self._current_temperature = float(data["CH1currentRoomTemp"])
+                        self._frost = float(data["frost"])
+                        self._status = "ON" if data['CH1heatOnOffStatus'] == "1" else "OFF"
+                        self._current_operation_mode = "OFF" if data['CH1heatOnOff'] == "1" else "ON"
                     else:
-                      self._status = "OFF"
-                    mode = data['CH1heatOnOff']
-                    if mode == "1":
-                      self._current_operation_mode = "OFF"
-                    else:
-                      self._current_operation_mode = "ON"
+                        _LOGGER.error(f"Unexpected content type: {content_type}. Response: {text}")
+                elif response.status == 401:
+                    _LOGGER.warning("Token expired, re-authenticating.")
+                    await self.get_token()
+                    await self._get_data()
                 else:
-                    _LOGGER.error("Could not get data from Salus.")
-            except:
-                self.get_token()
-                self._get_data()
-        except:
-            _LOGGER.error("Error Geting the data from Web. Please check the connection to salus-it500.com manually.")
+                    _LOGGER.error(f"Failed to get data, status: {response.status}")
+        except aiohttp.ClientError as e:
+            _LOGGER.error(f"Network error occurred: {e}")
+        except json.JSONDecodeError:
+            _LOGGER.error("Failed to decode JSON response.")
 
-    def update(self):
-        """Get the latest data."""
-        self._get_data()
-
+    async def async_update(self):
+        """Asynchronous update for Home Assistant."""
+        async with self._update_lock:
+            await self._get_data()
