@@ -1,12 +1,24 @@
-# Home-Assistant Custom Components
+# Home Assistant Salus Thermostat Climate Component
 
-Custom Components for Home-Assistant (http://www.home-assistant.io)
+A custom component for Home Assistant (https://www.home-assistant.io) that integrates with Salus thermostats through the salus-it500.com website via scraping.
 
-# Salus Thermostat Climate Component
+This component works with Salus thermostats like the RT301i that connect to the IT500 system. If you can control your thermostat through the salus-it500.com website, this integration should work for you.
 
-My device is RT301i, it is working with it500 thermostat, the ideea is simple if you have a Salus Thermostat and you are able to login to salus-it500.com and controll it from this page, this custom component should work.
-Component to interface with the salus-it500.com.
-It reads the Current Temperature, Set Temperature, Current HVAC Mode, Current Relay Mode.
+The component provides:
+
+- Current Temperature
+- Set Temperature
+- Current HVAC Mode
+- Current Relay Mode
+
+## Maintenance Notice
+
+This repository is now under new maintenance after the original author became unresponsive. The integration has been updated to:
+
+- Use async methods for better performance
+- Fix compatibility with Home Assistant 2025.3
+- Address deprecation warnings
+- Improve HACS integration
 
 ## Installation
 
@@ -49,3 +61,9 @@ climate:
 ### Known issues
 
 salus-it500.com server is bloking the IP of the host, in our case the HA external IP. This can be fixed with router restart in case of PPOE connection or you can try to send a mail to salus support...
+
+## Acknowledgements
+
+- Original author: @floringhimie
+- Async implementation: @Big-Szu
+- Current maintainer: @kmaid
