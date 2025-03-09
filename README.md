@@ -10,8 +10,6 @@ It reads the Current Temperature, Set Temperature, Current HVAC Mode, Current Re
 
 ## Installation
 
-### Option 1: Installation via HACS (Recommended)
-
 1. Make sure you have [HACS](https://hacs.xyz/) installed in your Home Assistant instance.
 2. Click on HACS in the sidebar.
 3. Go to "Integrations" tab.
@@ -20,9 +18,8 @@ It reads the Current Temperature, Set Temperature, Current HVAC Mode, Current Re
 6. Click "ADD".
 7. Look for "Salus Thermostat" in the integrations tab and click on it.
 8. Click "INSTALL" and then "INSTALL" again on the confirmation dialog.
-9. Restart Home Assistant.
-10. Add the configuration to your `configuration.yaml` file (see configuration section below).
-11. Restart Home Assistant again.
+9. Add the configuration to your `configuration.yaml` file (see configuration section below).
+10. Restart Home Assistant.
 
 ## Configuration
 
