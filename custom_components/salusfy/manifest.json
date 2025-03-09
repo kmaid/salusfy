@@ -1,11 +1,11 @@
 {
   "domain": "salusfy",
-  "name": "Salus thermostat",
+  "name": "it500 Salus Thermostat",
   "version": "0.0.1",
-  "documentation": "https://github.com/floringhimie/salusfy",
-  "issue_tracker": "https://github.com/floringhimie/salusfy/issues",
+  "documentation": "https://github.com/kmaid/salusfy",
+  "issue_tracker": "https://github.com/kmaid/salusfy/issues",
   "requirements": [],
   "dependencies": [],
-  "codeowners": ["@floringhimie"],
+  "codeowners": ["@kmaid"],
   "iot_class": "cloud_polling"
 }

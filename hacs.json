@@ -1,6 +1,7 @@
 {
-  "name": "Salus Thermostat",
+  "name": "it500 Salus Thermostat",
   "render_readme": true,
   "domain": "salusfy",
+  "country": "NO",
   "documentation": "https://github.com/kmaid/salusfy"
 }
